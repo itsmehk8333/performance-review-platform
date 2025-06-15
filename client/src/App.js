@@ -18,6 +18,7 @@ import ReviewTemplates from './pages/ReviewTemplates';
 import ReviewCycles from './pages/ReviewCycles';
 import Exports from './pages/Exports';
 import OrgChart from './pages/OrgChart';
+import Analytics from './pages/Analytics';
 
 function App() {
   return (
@@ -45,6 +46,7 @@ function App() {
               <Route path="/reviews/templates" element={<ReviewTemplates />} />
               <Route path="/reviews/cycles" element={<ReviewCycles />} />
               <Route path="/exports" element={<Exports />} />
+              <Route path="/analytics" element={<Analytics />} />
             </Route>
             
             {/* Admin-only routes */}

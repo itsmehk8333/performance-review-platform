@@ -265,13 +265,23 @@ const Layout = ({ children }) => {
               </>
             )}
           </Box>          {(isAdmin() || isManager()) && (
-            <NavItem 
-              icon={FiDownload} 
-              to="/exports" 
-              active={location.pathname === '/exports'}
-            >
-              Exports
-            </NavItem>          )}
+            <>
+              <NavItem 
+                icon={FiDownload} 
+                to="/exports" 
+                active={location.pathname === '/exports'}
+              >
+                Exports
+              </NavItem>
+              <NavItem 
+                icon={FiBarChart2} 
+                to="/analytics" 
+                active={location.pathname === '/analytics'}
+              >
+                Analytics
+              </NavItem>
+            </>
+          )}
           {isAdmin() && (
             <NavItem 
               icon={FiUsers} 
@@ -355,14 +365,24 @@ const Layout = ({ children }) => {
                   </>
                 )}
               </Box>              {(isAdmin() || isManager()) && (
-                <NavItem 
-                  icon={FiDownload} 
-                  to="/exports" 
-                  active={location.pathname === '/exports'}
-                  onClick={onClose}
-                >
-                  Exports
-                </NavItem>
+                <>
+                  <NavItem 
+                    icon={FiDownload} 
+                    to="/exports" 
+                    active={location.pathname === '/exports'}
+                    onClick={onClose}
+                  >
+                    Exports
+                  </NavItem>
+                  <NavItem 
+                    icon={FiBarChart2} 
+                    to="/analytics" 
+                    active={location.pathname === '/analytics'}
+                    onClick={onClose}
+                  >
+                    Analytics
+                  </NavItem>
+                </>
               )}              {isAdmin() && (
                 <NavItem 
                   icon={FiUsers} 

@@ -5,7 +5,7 @@ const ReviewCycle = require('../models/ReviewCycle');
 const Review = require('../models/Review');
 const ReviewTemplate = require('../models/ReviewTemplate');
 const User = require('../models/User');
-const { adminOnly, managerAndAbove, auth } = require('../middleware/auth');
+const { adminOnly, managerAndAbove, auth, managerOrAdminOnly } = require('../middleware/auth');
 const { Parser } = require('json2csv');
 const PDFDocument = require('pdfkit');
 // Import our new services
@@ -475,8 +475,8 @@ router.post('/:id/submit', async (req, res) => {
 
 // @route   GET api/reviews/export
 // @desc    Export reviews as CSV or PDF
-// @access  Private
-router.get('/export', async (req, res) => {
+// @access  Private (Manager or Admin)
+router.get('/export', managerOrAdminOnly, async (req, res) => {
   try {
     const { cycleId, type, format } = req.query;
     
@@ -491,11 +491,18 @@ router.get('/export', async (req, res) => {
       filter.type = type;
     }
     
-    // If not admin, only show reviews where current user is reviewer or reviewee
+    // If not admin, only show reviews for manager's team members
     if (req.user.role.name !== 'Admin') {
+      // Get all users who report to this manager
+      const teamMembers = await User.find({ managerId: req.user.id }).select('_id');
+      const teamMemberIds = teamMembers.map(member => member._id);
+      
+      // Include the manager's own reviews as well
+      teamMemberIds.push(req.user.id);
+      
       filter.$or = [
-        { reviewer: req.user.id },
-        { reviewee: req.user.id }
+        { reviewer: { $in: teamMemberIds } },
+        { reviewee: { $in: teamMemberIds } }
       ];
     }
     
@@ -789,7 +796,7 @@ router.post('/:id/calibrate', managerAndAbove, async (req, res) => {
 // @route   GET api/reviews/:id/export
 // @desc    Export a single review as PDF
 // @access  Private
-router.get('/:id/export', async (req, res) => {
+router.get('/:id/export', auth, async (req, res) => {
   try {
     const review = await Review.findById(req.params.id)
       .populate('cycleId', 'name startDate endDate')
@@ -801,11 +808,32 @@ router.get('/:id/export', async (req, res) => {
       return res.status(404).json({ msg: 'Review not found' });
     }
     
-    // Security check - users should only export reviews they're involved with
-    if (req.user.role.name !== 'Admin' && 
-        req.user.role.name !== 'Manager' && 
-        req.user.id !== review.reviewer.toString() && 
-        req.user.id !== review.reviewee.toString()) {
+    // Security check - managers can access their team's reviews, admins can access all
+    let authorized = false;
+    
+    // Admin can access any review
+    if (req.user.role.name === 'Admin') {
+      authorized = true;
+    }
+    // Manager can access reviews of their direct reports or their own
+    else if (req.user.role.name === 'Manager') {
+      // Get all users who report to this manager
+      const teamMembers = await User.find({ managerId: req.user.id }).select('_id');
+      const teamMemberIds = teamMembers.map(member => member._id.toString());
+      
+      // Check if the review involves the manager or their team members
+      authorized = teamMemberIds.includes(review.reviewer.toString()) || 
+                  teamMemberIds.includes(review.reviewee.toString()) ||
+                  req.user.id === review.reviewer.toString() || 
+                  req.user.id === review.reviewee.toString();
+    }
+    // Regular employee can only access their own reviews
+    else {
+      authorized = req.user.id === review.reviewer.toString() || 
+                  req.user.id === review.reviewee.toString();
+    }
+    
+    if (!authorized) {
       return res.status(403).json({ msg: 'Not authorized to export this review' });
     }
     

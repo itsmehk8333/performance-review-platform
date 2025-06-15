@@ -47,10 +47,10 @@ import {
   AlertTitle,
   AlertDescription
 } from '@chakra-ui/react';
-import { FiDownload, FiEdit, FiCheck, FiAlertCircle, FiInfo, FiThumbsUp, FiThumbsDown, FiClock, FiAlertTriangle, FiFileText } from 'react-icons/fi';
+import { FiDownload, FiEdit, FiCheck, FiAlertCircle, FiInfo, FiThumbsUp, FiThumbsDown, FiClock, FiAlertTriangle, FiFileText, FiZap } from 'react-icons/fi';
 import { format } from 'date-fns';
 import Layout from '../components/Layout';
-import { getReview, submitReview, exportReviewPDF, getReviewTemplate, approveReview, rejectReview, recalculateSentiment, summarizeText } from '../utils/api';
+import { getReview, submitReview, exportReviewPDF, getReviewTemplate, approveReview, rejectReview, recalculateSentiment, summarizeText, generateReviewDraft } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import SentimentBadge from '../components/SentimentBadge';
 import SentimentComparison from '../components/SentimentComparison';
@@ -66,8 +66,7 @@ const ReviewDetail = () => {
   const [template, setTemplate] = useState(null);
   const [isEditable, setIsEditable] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
-  const [isRejecting, setIsRejecting] = useState(false);
-  const [isRejectionSubmitting, setIsRejectionSubmitting] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);  const [isRejectionSubmitting, setIsRejectionSubmitting] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [isSubmitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
@@ -78,6 +77,7 @@ const ReviewDetail = () => {
   const [exportLoading, setExportLoading] = useState(false);
   const [summarizingAnswers, setSummarizingAnswers] = useState({});
   const [summaries, setSummaries] = useState({});
+  const [generatingDraft, setGeneratingDraft] = useState(false);
   
   useEffect(() => {
     fetchReview();
@@ -345,21 +345,19 @@ const ReviewDetail = () => {
                   >
                     <Text fontWeight="bold" fontSize="md" color="blue.700" mb={2}>
                       Summary Analysis:
-                    </Text>
-                    
-                    <Box mb={2}>
+                    </Text>                    <Box mb={2}>
                       <Text fontWeight="bold" color="blue.700">Key Themes:</Text>
-                      <Text>{summaries[answerId].keyThemes}</Text>
+                      <Text whiteSpace="pre-line">{summaries[answerId].keyThemes}</Text>
                     </Box>
                     
                     <Box mb={2}>
                       <Text fontWeight="bold" color="blue.700">Strengths / Weaknesses:</Text>
-                      <Text>{summaries[answerId].strengthsWeaknesses}</Text>
+                      <Text whiteSpace="pre-line">{summaries[answerId].strengthsWeaknesses}</Text>
                     </Box>
                     
                     <Box>
                       <Text fontWeight="bold" color="blue.700">Impact Statements:</Text>
-                      <Text>{summaries[answerId].impactStatements}</Text>
+                      <Text whiteSpace="pre-line">{summaries[answerId].impactStatements}</Text>
                     </Box>
                   </Box>
                 )}
@@ -400,12 +398,66 @@ const ReviewDetail = () => {
       }
       
       setSummarizingAnswers(prev => ({...prev, [id]: true}));
+        const response = await summarizeText(text);
+        // Ensure the summary object has all the expected properties in a clean format
+      const summary = response.data.summary;
       
-      const response = await summarizeText(text);
+      // Format key themes
+      let formattedKeyThemes;
+      if (typeof summary.keyThemes === 'string') {
+        formattedKeyThemes = summary.keyThemes;
+      } else if (Array.isArray(summary.keyThemes)) {
+        formattedKeyThemes = summary.keyThemes.join('\n• ');
+        if (formattedKeyThemes) formattedKeyThemes = '• ' + formattedKeyThemes;
+      } else {
+        formattedKeyThemes = JSON.stringify(summary.keyThemes);
+      }
+      
+      // Format strengths and weaknesses
+      let formattedStrengthsWeaknesses;
+      if (typeof summary.strengthsWeaknesses === 'string') {
+        formattedStrengthsWeaknesses = summary.strengthsWeaknesses;
+      } else if (summary.strengthsWeaknesses && typeof summary.strengthsWeaknesses === 'object') {
+        const strengths = Array.isArray(summary.strengthsWeaknesses.Strengths) ?
+          summary.strengthsWeaknesses.Strengths : [];
+        const weaknesses = Array.isArray(summary.strengthsWeaknesses.Weaknesses) ?
+          summary.strengthsWeaknesses.Weaknesses : [];
+        
+        let strengthsText = '';
+        if (strengths.length > 0) {
+          strengthsText = 'Strengths:\n• ' + strengths.join('\n• ');
+        }
+        
+        let weaknessesText = '';
+        if (weaknesses.length > 0) {
+          weaknessesText = 'Weaknesses:\n• ' + weaknesses.join('\n• ');
+        }
+        
+        formattedStrengthsWeaknesses = [strengthsText, weaknessesText].filter(Boolean).join('\n\n');
+      } else {
+        formattedStrengthsWeaknesses = JSON.stringify(summary.strengthsWeaknesses);
+      }
+      
+      // Format impact statements
+      let formattedImpactStatements;
+      if (typeof summary.impactStatements === 'string') {
+        formattedImpactStatements = summary.impactStatements;
+      } else if (Array.isArray(summary.impactStatements)) {
+        formattedImpactStatements = summary.impactStatements.join('\n• ');
+        if (formattedImpactStatements) formattedImpactStatements = '• ' + formattedImpactStatements;
+      } else {
+        formattedImpactStatements = JSON.stringify(summary.impactStatements);
+      }
+      
+      const formattedSummary = {
+        keyThemes: formattedKeyThemes,
+        strengthsWeaknesses: formattedStrengthsWeaknesses,
+        impactStatements: formattedImpactStatements
+      };
       
       setSummaries(prev => ({
         ...prev,
-        [id]: response.data.summary
+        [id]: formattedSummary
       }));
       
       toast({
@@ -426,6 +478,73 @@ const ReviewDetail = () => {
     } finally {
       setSummarizingAnswers(prev => ({...prev, [id]: false}));
     }
+  };
+  
+  const handleGenerateDraft = async () => {
+    try {
+      if (!review || !review.reviewee) {
+        toast({
+          title: 'Missing reviewee information',
+          description: 'Cannot generate draft without reviewee information',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        });
+        return;
+      }
+      
+      setGeneratingDraft(true);
+        const revieweeId = typeof review.reviewee === 'object' ? 
+        (review.reviewee._id || review.reviewee.id) : 
+        review.reviewee;
+      
+      const response = await generateReviewDraft({
+        revieweeId,
+        reviewType: review.type || 'peer',
+        cycleId: review.cycleId || review.cycle
+      });
+      
+      // Update form data with the generated draft
+      setFormData(prev => ({
+        ...prev,
+        content: response.data.draft
+      }));
+      
+      // If we're not in edit mode yet, enable it
+      if (!isEditable) {
+        setIsEditable(true);
+      }
+      
+      toast({
+        title: 'Draft generated',
+        description: 'A draft review has been generated. Feel free to edit it before submitting.',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (error) {
+      console.error('Error generating draft review:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.msg || 'Failed to generate draft review',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      setGeneratingDraft(false);
+    }
+  };
+  
+  // Helper function to determine if the current user can edit this review
+  const canEditReview = (reviewData) => {
+    return (
+      reviewData.reviewer && 
+      user && 
+      reviewData.reviewer._id === user._id && 
+      reviewData.status !== 'submitted' && 
+      reviewData.status !== 'approved'
+    );
   };
   
   if (loading) {
@@ -633,55 +752,159 @@ const ReviewDetail = () => {
             <Heading size="md">Review Content</Heading>
           </CardHeader>
           <CardBody>
-            <VStack spacing={6} align="stretch">              {/* Only used for old reviews without structured format */}
-              {review.content && !review.answers?.length && (
-                <>
-                  <Text whiteSpace="pre-wrap">{review.content}</Text>
+            <VStack spacing={6} align="stretch">
+              {/* Editable Review Content */}
+              {isEditable ? (
+                <Box>
+                  <FormControl>
+                    <FormLabel>Review Content</FormLabel>
+                    <Textarea
+                      value={formData.content}
+                      onChange={(e) => setFormData({...formData, content: e.target.value})}
+                      minHeight="200px"
+                      placeholder="Provide your review feedback here..."
+                    />
+                  </FormControl>
                   
-                  {review.content.length > 200 && (
-                    <Box mt={3}>
+                  <HStack mt={4} spacing={4}>
+                    <Button
+                      leftIcon={<FiZap />}
+                      colorScheme="blue"
+                      isLoading={generatingDraft}
+                      onClick={handleGenerateDraft}
+                      isDisabled={generatingDraft}
+                    >
+                      Suggest Draft
+                    </Button>
+                    
+                    <Button
+                      leftIcon={<FiCheck />}
+                      colorScheme="green"
+                      onClick={async () => {
+                        try {
+                          setSubmitting(true);
+                          await submitReview(review._id, formData);
+                          toast({
+                            title: 'Review submitted',
+                            description: 'Your review has been submitted successfully',
+                            status: 'success',
+                            duration: 3000,
+                            isClosable: true,
+                          });
+                          fetchReview(); // Refresh the review data
+                        } catch (error) {
+                          console.error('Error submitting review:', error);
+                          toast({
+                            title: 'Error',
+                            description: error.response?.data?.msg || 'Failed to submit review',
+                            status: 'error',
+                            duration: 3000,
+                            isClosable: true,
+                          });
+                        } finally {
+                          setSubmitting(false);
+                        }
+                      }}
+                      isLoading={isSubmitting}
+                      isDisabled={isSubmitting}
+                    >
+                      Submit Review
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        // Reset form data and disable edit mode
+                        setFormData({
+                          content: review.content || '',
+                          ratings: review.ratings ? Object.fromEntries(
+                            Object.entries(review.ratings || {}).map(([key, value]) => [key, Number(value)])
+                          ) : {},
+                          answers: review.answers || []
+                        });
+                        setIsEditable(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </HStack>
+                </Box>
+              ) : (
+                <>
+                  {/* Option to Edit if allowed but not in edit mode */}
+                  {canEditReview(review) && !isEditable && (
+                    <HStack mb={4}>
                       <Button
-                        size="sm"
+                        leftIcon={<FiEdit />}
                         colorScheme="blue"
-                        variant="outline"
-                        leftIcon={<FiFileText />}
-                        onClick={() => handleSummarize('main-content', review.content)}
-                        isLoading={summarizingAnswers['main-content']}
-                        isDisabled={summarizingAnswers['main-content']}
-                        mb={2}
+                        size="sm"
+                        onClick={() => setIsEditable(true)}
                       >
-                        Summarize
+                        Edit Review
                       </Button>
-                        {summaries['main-content'] && (
-                        <Box 
-                          mt={2} 
-                          p={3} 
-                          bg="blue.50" 
-                          borderRadius="md"
-                          borderLeft="4px solid" 
-                          borderColor="blue.500"
-                        >
-                          <Text fontWeight="bold" fontSize="md" color="blue.700" mb={2}>
-                            Summary Analysis:
-                          </Text>
-                          
-                          <Box mb={2}>
+                      
+                      <Button
+                        leftIcon={<FiZap />}
+                        colorScheme="teal"
+                        size="sm"
+                        onClick={handleGenerateDraft}
+                        isLoading={generatingDraft}
+                        isDisabled={generatingDraft}
+                      >
+                        Suggest Draft
+                      </Button>
+                    </HStack>
+                  )}
+                  
+                  {/* Non-editable Review Content */}
+                  {review.content && !review.answers?.length && (
+                    <>
+                      <Text whiteSpace="pre-wrap">{review.content}</Text>
+                      
+                      {review.content.length > 200 && (
+                        <Box mt={3}>
+                          <Button
+                            size="sm"
+                            colorScheme="blue"
+                            variant="outline"
+                            leftIcon={<FiFileText />}
+                            onClick={() => handleSummarize('main-content', review.content)}
+                            isLoading={summarizingAnswers['main-content']}
+                            isDisabled={summarizingAnswers['main-content']}
+                            mb={2}
+                          >
+                            Summarize
+                          </Button>
+                          {summaries['main-content'] && (
+                            <Box 
+                              mt={2} 
+                              p={3} 
+                              bg="blue.50" 
+                              borderRadius="md"
+                              borderLeft="4px solid" 
+                              borderColor="blue.500"
+                            >
+                              <Text fontWeight="bold" fontSize="md" color="blue.700" mb={2}>
+                                Summary Analysis:
+                              </Text>                          <Box mb={2}>
                             <Text fontWeight="bold" color="blue.700">Key Themes:</Text>
-                            <Text>{summaries['main-content'].keyThemes}</Text>
+                            <Text whiteSpace="pre-line">{summaries['main-content'].keyThemes}</Text>
                           </Box>
                           
                           <Box mb={2}>
                             <Text fontWeight="bold" color="blue.700">Strengths / Weaknesses:</Text>
-                            <Text>{summaries['main-content'].strengthsWeaknesses}</Text>
+                            <Text whiteSpace="pre-line">{summaries['main-content'].strengthsWeaknesses}</Text>
                           </Box>
                           
                           <Box>
                             <Text fontWeight="bold" color="blue.700">Impact Statements:</Text>
-                            <Text>{summaries['main-content'].impactStatements}</Text>
+                            <Text whiteSpace="pre-line">{summaries['main-content'].impactStatements}</Text>
                           </Box>
+                            </Box>
+                          )}
                         </Box>
                       )}
-                    </Box>
+                    </>
                   )}
                 </>
               )}
@@ -693,11 +916,10 @@ const ReviewDetail = () => {
                     const answer = review.answers.find(a => a.questionId === question._id);
                     return (
                       <Box key={question._id} p={4} borderWidth="1px" borderRadius="md">
-                        <Text fontWeight="bold">{question.text}</Text>
-                        {renderAnswer(question, answer)}
+                        <Text fontWeight="bold">{question.text}</Text>                        {renderAnswer(question, answer)}
                         
                         {/* Summarization button for open-ended questions */}
-                        {question.type === 'open-ended' && (
+                        {question.type === 'open-ended' && answer && answer.textValue && (
                           <HStack mt={2}>
                             <Button
                               leftIcon={<FiFileText />}
@@ -707,13 +929,36 @@ const ReviewDetail = () => {
                               isLoading={summarizingAnswers[question._id]}
                             >
                               Summarize Answer
-                            </Button>
-                            
+                            </Button>                            
                             {/* Show summary if available */}
                             {summaries[question._id] && (
-                              <Text fontSize="sm" color="gray.600" whiteSpace="pre-wrap">
-                                {summaries[question._id]}
-                              </Text>
+                              <Box 
+                                mt={2} 
+                                p={3} 
+                                bg="blue.50" 
+                                borderRadius="md"
+                                borderLeft="4px solid" 
+                                borderColor="blue.500"
+                                w="100%"
+                              >
+                                <Text fontWeight="bold" fontSize="md" color="blue.700" mb={2}>
+                                  Summary Analysis:
+                                </Text>
+                                  <Box mb={2}>
+                                  <Text fontWeight="bold" color="blue.700">Key Themes:</Text>
+                                  <Text whiteSpace="pre-line">{summaries[question._id].keyThemes}</Text>
+                                </Box>
+                                
+                                <Box mb={2}>
+                                  <Text fontWeight="bold" color="blue.700">Strengths / Weaknesses:</Text>
+                                  <Text whiteSpace="pre-line">{summaries[question._id].strengthsWeaknesses}</Text>
+                                </Box>
+                                
+                                <Box>
+                                  <Text fontWeight="bold" color="blue.700">Impact Statements:</Text>
+                                  <Text whiteSpace="pre-line">{summaries[question._id].impactStatements}</Text>
+                                </Box>
+                              </Box>
                             )}
                           </HStack>
                         )}

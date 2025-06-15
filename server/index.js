@@ -19,6 +19,7 @@ const reviewRoutes = require('./routes/reviews');
 const templateRoutes = require('./routes/templates');
 const aiRoutes = require('./routes/ai');
 const orgRoutes = require('./routes/org'); // New org chart routes
+const analyticsRoutes = require('./routes/analytics'); // Analytics routes
 
 // Import middleware
 const { auth } = require('./middleware/auth');
@@ -31,6 +32,7 @@ app.use('/api/reviews', auth, reviewRoutes);
 app.use('/api/templates', auth, templateRoutes);
 app.use('/api/ai', auth, aiRoutes);
 app.use('/api/org', auth, orgRoutes); // New org chart API
+app.use('/api/analytics', auth, analyticsRoutes); // Analytics API
 
 // Default route
 app.get('/', (req, res) => {

@@ -49,7 +49,7 @@ import {
   AlertIcon
 } from '@chakra-ui/react';
 import { ChevronDownIcon } from '@chakra-ui/icons';
-import { FiCalendar, FiClipboard, FiDownload, FiPlusCircle, FiUsers, FiFileText, FiRefreshCw } from 'react-icons/fi';
+import { FiCalendar, FiClipboard, FiDownload, FiPlusCircle, FiUsers, FiFileText, FiRefreshCw, FiZap } from 'react-icons/fi';
 import { format } from 'date-fns';
 import Layout from '../components/Layout';
 import { 
@@ -61,7 +61,8 @@ import {
   exportReviews,
   getReviewTemplates,
   updateReviewCycle,
-  advanceReviewCycle
+  advanceReviewCycle,
+  generateReviewDraft
 } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
@@ -95,6 +96,7 @@ const Reviews = () => {
     }
   });
   const [selectedReview, setSelectedReview] = useState(null);
+  const [generatingDraft, setGeneratingDraft] = useState(false);
   
   const newCycleModal = useDisclosure();
   const assignReviewsModal = useDisclosure();
@@ -458,6 +460,58 @@ const Reviews = () => {
         ratings: newRatings
       };
     });
+  };
+  
+  const handleGenerateDraft = async (review) => {
+    try {
+      if (!review || !review.reviewee) {
+        toast({
+          title: 'Missing reviewee information',
+          description: 'Cannot generate draft without reviewee information',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        });
+        return;
+      }
+      
+      setGeneratingDraft(true);
+      
+      const revieweeId = typeof review.reviewee === 'object' ? 
+        (review.reviewee._id || review.reviewee.id) : 
+        review.reviewee;
+      
+      const response = await generateReviewDraft({
+        revieweeId,
+        reviewType: review.type || 'peer',
+        cycleId: review.cycleId || review.cycle
+      });
+      
+      // Update form data with the generated draft
+      setReviewFormData(prev => ({
+        ...prev,
+        content: response.data.draft
+      }));
+      
+      toast({
+        title: 'Draft generated',
+        description: 'A draft review has been generated. Feel free to edit it before submitting.',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (error) {
+      console.error('Error generating draft review:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.msg || 'Failed to generate draft review',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      setGeneratingDraft(false);
+    }
   };
   
   const handleReviewTypeToggle = (type) => {
@@ -1149,13 +1203,24 @@ const Reviews = () => {
           <ModalCloseButton />
           <ModalBody>
             <FormControl mb={6} isRequired>
-              <FormLabel>Review Content</FormLabel>
-              <Textarea 
+              <FormLabel>Review Content</FormLabel>              <Textarea 
                 placeholder="Provide your detailed feedback..."
                 value={reviewFormData.content}
                 onChange={(e) => setReviewFormData({...reviewFormData, content: e.target.value})}
                 rows={8}
               />
+              
+              <Button
+                leftIcon={<FiZap />}
+                colorScheme="teal"
+                size="sm"
+                mt={2}
+                onClick={() => handleGenerateDraft(selectedReview)}
+                isLoading={generatingDraft}
+                isDisabled={generatingDraft}
+              >
+                Suggest Draft
+              </Button>
             </FormControl>
             
             <FormControl mb={4}>
@@ -1181,13 +1246,10 @@ const Reviews = () => {
                 ))}
               </VStack>
             </FormControl>
-          </ModalBody>
-          
-          <ModalFooter>
+          </ModalBody>            <ModalFooter>
             <Button variant="ghost" mr={3} onClick={submitReviewModal.onClose}>
               Cancel
-            </Button>
-            <Button colorScheme="purple" onClick={handleSubmitReview}>
+            </Button><Button colorScheme="purple" onClick={handleSubmitReview}>
               Submit Review
             </Button>
           </ModalFooter>

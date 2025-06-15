@@ -97,6 +97,11 @@ export const deleteReviewTemplate = (id) => api.delete(`/templates/${id}`);
 // AI API
 export const getSuggestion = (data) => api.post('/ai/suggest', data);
 export const summarizeText = (text) => api.post('/ai/summarize', { text });
+export const generateReviewDraft = (data) => api.post('/ai/generate-draft', data);
+
+// Analytics API
+export const getReviewVolumeData = () => api.get('/analytics/review-volume');
+export const getFeedbackFrequencyData = () => api.get('/analytics/feedback-frequency');
 
 // Users API
 export const getUsers = () => api.get('/auth/users');

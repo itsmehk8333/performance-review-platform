@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Goal = require('../models/Goal');
 const Feedback = require('../models/Feedback');
+const Review = require('../models/Review');
 const OpenAI = require('openai');
 
 // OpenAI setup
@@ -209,6 +210,104 @@ router.post('/summarize', async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');
+  }
+});
+
+// @route   POST api/ai/generate-draft
+// @desc    Generate a draft review based on goal data and past reviews
+// @access  Private
+router.post('/generate-draft', async (req, res) => {
+  try {
+    // Check if OpenAI API key is configured
+    if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === 'your_openai_api_key_here') {
+      return res.status(500).json({ 
+        msg: 'OpenAI API key is not configured. Please add a valid API key to your .env file.',
+        draft: 'This is a placeholder draft since the OpenAI API is not configured. Please provide specific, actionable feedback based on the reviewee\'s performance and goals.'
+      });
+    }
+
+    const { revieweeId, reviewType, cycleId } = req.body;
+    
+    if (!revieweeId) {
+      return res.status(400).json({ msg: 'Reviewee ID is required' });
+    }
+
+    // Find reviewee's goals
+    const goals = await Goal.find({ owner: revieweeId })
+                           .sort({ createdAt: -1 })
+                           .limit(5);
+                           
+    // Find past reviews for the reviewee
+    const pastReviews = await Review.find({ 
+      reviewee: revieweeId,
+      status: 'submitted',
+      type: reviewType || { $in: ['peer', 'manager'] } // Filter by type if provided
+    })
+    .sort({ submittedAt: -1 })
+    .limit(3)
+    .populate('reviewer', 'name');
+
+    // Prepare goal data
+    const goalData = goals.map(goal => ({
+      title: goal.title,
+      description: goal.description,
+      progress: goal.progress,
+      status: goal.status
+    }));
+    
+    // Prepare past review data
+    const reviewData = pastReviews.map(review => ({
+      type: review.type,
+      submittedAt: review.submittedAt,
+      content: review.content || '',
+      reviewerName: review.reviewer?.name || 'Anonymous'
+    }));
+    
+    // Build prompt for OpenAI
+    let prompt = `You are assisting with drafting a ${reviewType || 'peer'} review for a team member.
+    
+Reviewee goals:
+${goalData.length > 0 ? 
+  goalData.map(g => `- ${g.title} (${g.description || 'No description'}) - Progress: ${g.progress}% - Status: ${g.status}`).join('\n') : 
+  'No goals data available'}
+
+${reviewData.length > 0 ? `Past reviews:
+${reviewData.map(r => `${r.reviewerName} (${r.type}): "${r.content}"`).join('\n')}` : 
+'No past review data available'}
+
+Based on this information, generate a thoughtful, balanced, and specific draft review that:
+1. Acknowledges specific accomplishments related to their goals
+2. Provides constructive feedback on areas for improvement
+3. Includes specific examples where possible
+4. Is written in a professional, supportive tone
+5. Is approximately 200-400 words in length
+
+This is a ${reviewType || 'peer'} review, so focus on appropriate aspects for this review type:
+${reviewType === 'self' ? '- Self-reflection and honest self-assessment' : 
+  reviewType === 'manager' ? '- Performance evaluation, career development, and team contributions' :
+  reviewType === 'upward' ? '- Management style, communication, and leadership qualities' :
+  '- Collaboration, teamwork, skills, and peer-to-peer interactions'}`;
+
+    // Call OpenAI for draft generation
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { 
+          role: "system", 
+          content: `You are a professional review writer assistant helping to draft workplace performance reviews. Provide balanced, specific, and constructive feedback.` 
+        },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 600,
+      temperature: 0.7,
+    });
+    
+    const draft = response.choices[0].message.content.trim();
+    
+    res.json({ draft });
+  } catch (err) {
+    console.error('Error generating review draft:', err);
+    res.status(500).json({ msg: 'Server error', error: err.message });
   }
 });
 
