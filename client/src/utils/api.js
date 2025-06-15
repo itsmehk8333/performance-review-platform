@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'https://performance-review-platform.onrender.com/';
+const API_URL =  'https://performance-review-platform.onrender.com/';
 
 // Create axios instance
 const api = axios.create({
