@@ -2,6 +2,16 @@
 
 An enterprise-ready, AI-augmented platform that simplifies performance management for HR teams, managers, and employees.
 
+## Live Demo
+
+- **Frontend**: [https://gorgeous-bienenstitch-932b3b.netlify.app/login](https://gorgeous-bienenstitch-932b3b.netlify.app/login)
+- **Backend API**: [https://performance-review-platform.onrender.com/api](https://performance-review-platform.onrender.com/api)
+
+### Demo Credentials
+- **Admin**: admin@example.com / password123
+- **Manager**: manager@example.com / password123
+- **Employee**: employee1@example.com / password123 or employee2@example.com / password123
+
 ## Features
 
 - OKR & Goal Management (Create, assign, and track goals)
@@ -164,7 +174,9 @@ After running the seed script, you can log in with the following credentials:
 
 ## Testing the Application
 
-To test the application and ensure all features are working properly:
+### Local Testing
+
+To test the application locally and ensure all features are working properly:
 
 1. Make sure MongoDB is running locally
 2. Seed the database with sample data:
@@ -185,13 +197,27 @@ To test the application and ensure all features are working properly:
 4. Login with one of the following accounts:
    - Admin: admin@example.com / password123
    - Manager: manager@example.com / password123
-   - Employee: employee@example.com / password123
+   - Employee: employee1@example.com / password123
 
 5. Test the following features:
    - **Goal Management**: Create, view, and update goals
    - **Feedback**: Provide and receive feedback
    - **Reviews**: Navigate through review cycles and submit reviews
    - **Exports**: Export reviews and feedback data (Manager/Admin only)
+
+### Deployment
+
+The application is deployed and available online:
+
+- **Frontend**: Deployed on Netlify at [https://gorgeous-bienenstitch-932b3b.netlify.app](https://gorgeous-bienenstitch-932b3b.netlify.app)
+- **Backend**: Deployed on Render at [https://performance-review-platform.onrender.com/api](https://performance-review-platform.onrender.com/api)
+- **Database**: MongoDB Atlas cloud database
+
+#### Deployment Configuration
+
+- The frontend uses Netlify's SPA redirect configuration (see `netlify.toml` and `_redirects` files)
+- The backend API is configured to accept CORS requests from the Netlify domain
+- Environment variables are configured in each platform's deployment settings
 
 ## Troubleshooting
 
