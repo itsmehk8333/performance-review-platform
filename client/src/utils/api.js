@@ -39,14 +39,33 @@ export const addGoalComment = (id, text) => api.post(`/goals/${id}/comments`, { 
 export const getFeedback = (params) => api.get('/feedback', { params });
 export const createFeedback = (feedback) => api.post('/feedback', feedback);
 export const getFeedbackTags = () => api.get('/feedback/tags');
-export const exportFeedback = (params) => 
-  api.get('/feedback/export', { 
+export const exportFeedback = async (params) => {
+  const response = await api.get('/feedback/export', { 
     params,
     responseType: 'blob'
   });
+  
+  // Create a download link and trigger it
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `feedback-export.${params.format || 'csv'}`);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  
+  return response;
+};
 
 // Reviews API
-export const getReviewCycles = () => api.get('/reviews/cycles');
+export const getReviewCycles = async () => {
+  try {
+    return await api.get('/reviews/cycles');
+  } catch (error) {
+    console.error('Error fetching review cycles:', error);
+    return { data: [] };
+  }
+};
 export const getReviewCycle = (id) => api.get(`/reviews/cycles/${id}`);
 export const createReviewCycle = (cycle) => api.post('/reviews/cycles', cycle);
 export const updateReviewCycle = (id, cycle) => api.put(`/reviews/cycles/${id}`, cycle);
@@ -57,15 +76,39 @@ export const getReview = (id) => api.get(`/reviews/${id}`);
 export const assignReviews = (data) => api.post('/reviews/assign', data);
 export const submitReview = (id, data) => api.post(`/reviews/${id}/submit`, data);
 export const calibrateReview = (id, data) => api.post(`/reviews/${id}/calibrate`, data);
-export const exportReviews = (params) => 
-  api.get('/reviews/export', { 
+export const exportReviews = async (params) => {
+  const response = await api.get('/reviews/export', { 
     params,
     responseType: 'blob'
   });
-export const exportReviewPDF = (id) => 
-  api.get(`/reviews/${id}/export`, { 
+  
+  // Create a download link and trigger it
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `reviews-export.${params.format || 'csv'}`);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  
+  return response;
+};
+export const exportReviewPDF = async (id) => {
+  const response = await api.get(`/reviews/${id}/export`, { 
     responseType: 'blob'
   });
+  
+  // Create a download link and trigger it
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `review-${id}.pdf`);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  
+  return response;
+};
 
 // New Approval System API endpoints
 export const approveReview = (id) => api.post(`/reviews/${id}/approve`);
@@ -104,7 +147,14 @@ export const getReviewVolumeData = () => api.get('/analytics/review-volume');
 export const getFeedbackFrequencyData = () => api.get('/analytics/feedback-frequency');
 
 // Users API
-export const getUsers = () => api.get('/auth/users');
+export const getUsers = async () => {
+  try {
+    return await api.get('/auth/users');
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    return { data: [] };
+  }
+};
 
 // Sentiment Analysis API
 export const recalculateSentiment = (id) => api.post(`/reviews/${id}/recalculate-sentiment`);

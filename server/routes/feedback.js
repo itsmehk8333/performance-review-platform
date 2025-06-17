@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Feedback = require('../models/Feedback');
 const Goal = require('../models/Goal');
-const { managerOrAdminOnly } = require('../middleware/auth');
+const { managerOrAdminOnly, auth } = require('../middleware/auth');
 const { Parser } = require('json2csv');
 const PDFDocument = require('pdfkit');
 
@@ -109,32 +109,59 @@ router.get('/', async (req, res) => {
 // @route   GET api/feedback/export
 // @desc    Export feedback as CSV or PDF
 // @access  Private - Managers or Admin only
-router.get('/export', managerOrAdminOnly, async (req, res) => {
+router.get('/export', auth, async (req, res) => {
   try {
-    const { format, userId } = req.query;
+    // Check if user and user.role exist
+    if (!req.user) {
+      console.log('Auth failed in feedback export: No user in request');
+      return res.status(403).json({ msg: 'Authentication required' });
+    }
     
-    // Build query
+    console.log('User object in feedback export:', JSON.stringify(req.user));
+    
+    if (!req.user.role) {
+      console.log('Auth failed in feedback export: User has no role property');
+      // Try to re-fetch the user with role populated
+      const User = require('../models/User'); // Make sure User model is available
+      const fullUser = await User.findById(req.user._id || req.user.id).populate('role');
+      if (!fullUser || !fullUser.role) {
+        return res.status(403).json({ msg: 'User role information not available' });
+      }
+      // Use the fetched user's role
+      req.user = fullUser;
+    }
+    
+    // Now check the role
+    const roleName = typeof req.user.role === 'object' ? req.user.role.name : req.user.role;
+    console.log('User role determined to be:', roleName);
+    
+    if (roleName !== 'Manager' && roleName !== 'Admin') {
+      console.log(`Auth failed in feedback export: User role ${roleName} is not Manager or Admin`);
+      return res.status(403).json({ msg: 'Access denied: Manager or Admin only' });
+    }
+    
+    console.log('Feedback export access granted to:', req.user._id || req.user.id, 'with role:', roleName);
+    
+    const { format, userId } = req.query;
+      // Build query
     const query = {};
     if (userId) {
-      query.$or = [{ from: userId }, { to: userId }];
+      query.author = userId;
     }
     
     // Get feedback data
     const feedback = await Feedback.find(query)
-      .populate('from', 'name email')
-      .populate('to', 'name email')
-      .populate('goalId', 'title')
+      .populate('author', 'name email')
+      .populate('goal', 'title')
       .sort({ createdAt: -1 });
-    
-    if (format === 'csv') {
+      if (format === 'csv') {
       // Generate CSV
-      const fields = ['From', 'To', 'Goal', 'Content', 'Sentiment', 'Date'];
+      const fields = ['Author', 'Goal', 'Content', 'Sentiment', 'Date'];
       const data = feedback.map(item => ({
-        'From': item.from.name,
-        'To': item.to.name,
-        'Goal': item.goalId ? item.goalId.title : 'General Feedback',
-        'Content': item.content,
-        'Sentiment': item.sentiment || 'N/A',
+        'Author': item.author ? (item.author.name || 'Unknown') : 'Unknown',
+        'Goal': item.goal ? (item.goal.title || 'General Feedback') : 'General Feedback',
+        'Content': item.text || '',
+        'Sentiment': item.sentiment?.label || 'N/A',
         'Date': new Date(item.createdAt).toLocaleDateString()
       }));
       
@@ -158,19 +185,17 @@ router.get('/export', managerOrAdminOnly, async (req, res) => {
       // Add content to PDF
       doc.fontSize(20).text('Feedback Export', { align: 'center' });
       doc.moveDown();
-      
-      feedback.forEach((item, index) => {
+        feedback.forEach((item, index) => {
         doc.fontSize(14).text(`Feedback #${index + 1}`);
-        doc.fontSize(12).text(`From: ${item.from.name} (${item.from.email})`);
-        doc.fontSize(12).text(`To: ${item.to.name} (${item.to.email})`);
-        if (item.goalId) {
-          doc.fontSize(12).text(`Goal: ${item.goalId.title}`);
+        doc.fontSize(12).text(`Author: ${item.author ? `${item.author.name} (${item.author.email})` : 'Unknown'}`);
+        if (item.goal) {
+          doc.fontSize(12).text(`Goal: ${item.goal.title}`);
         }
         doc.fontSize(12).text(`Date: ${new Date(item.createdAt).toLocaleDateString()}`);
-        doc.fontSize(12).text(`Sentiment: ${item.sentiment || 'N/A'}`);
+        doc.fontSize(12).text(`Sentiment: ${item.sentiment?.label || 'N/A'}`);
         doc.moveDown();
         doc.fontSize(12).text('Content:');
-        doc.fontSize(10).text(item.content);
+        doc.fontSize(10).text(item.text || '');
         doc.moveDown();
         
         if (index < feedback.length - 1) {

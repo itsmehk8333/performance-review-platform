@@ -215,11 +215,20 @@ const ReviewDetail = () => {
       setExportLoading(false);
     }
   };
-  
-  const handleApprove = async () => {
+    const handleApprove = async () => {
     setIsApproving(true);
     try {
-      await approveReview(id);
+      const response = await approveReview(id);
+      
+      // Update the review data directly with the response
+      setReview(prev => ({
+        ...prev,
+        status: 'approved',
+        approvalStatus: 'approved',
+        approvedAt: new Date(),
+        approvedBy: response.data.approvedBy
+      }));
+      
       toast({
         title: 'Review approved',
         description: 'The review has been approved successfully.',
@@ -227,7 +236,10 @@ const ReviewDetail = () => {
         duration: 3000,
         isClosable: true
       });
-      fetchReview(); // Refresh data after approval
+        fetchReview(); // Also fetch from server to ensure all data is updated
+      
+      // Dispatch event to notify other components that reviews have been updated
+      window.dispatchEvent(new Event('reviews-updated'));
     } catch (err) {
       toast({
         title: 'Error approving review',
@@ -263,10 +275,12 @@ const ReviewDetail = () => {
         status: 'success',
         duration: 3000,
         isClosable: true
-      });
-      setIsRejecting(false);
+      });      setIsRejecting(false);
       setRejectionReason("");
       fetchReview(); // Refresh data after rejection
+      
+      // Dispatch event to notify other components that reviews have been updated
+      window.dispatchEvent(new Event('reviews-updated'));
     } catch (err) {
       console.error('Error rejecting review:', err);
       toast({

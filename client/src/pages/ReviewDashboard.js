@@ -69,12 +69,29 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
       console.log("User not fully loaded yet, waiting for authentication...");
     }
   }, [user]); // Add user as a dependency so this runs when user data becomes available
-    const fetchDashboardData = async () => {
+  
+  // Add event listener to refresh dashboard when reviews are updated
+  useEffect(() => {
+    const handleReviewsUpdated = () => {
+      console.log("Reviews updated event detected, refreshing dashboard data");
+      if (user && user.id) {
+        fetchDashboardData();
+      }
+    };
+    
+    // Listen for the custom event
+    window.addEventListener('reviews-updated', handleReviewsUpdated);
+    
+    // Clean up
+    return () => window.removeEventListener('reviews-updated', handleReviewsUpdated);
+  }, [user]);
+  
+  const fetchDashboardData = async () => {
     try {
       setLoading(true);
       
       // Get active review cycle
-      const cyclesResponse = await getReviewCycles();
+      const cyclesResponse = await getReviewCycles();      
       const now = new Date();
       
       const currentCycle = cyclesResponse.data.find(cycle => {
@@ -89,6 +106,7 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
         const reviewsResponse = await getReviews({ cycleId: currentCycle._id });
         
         console.log("All reviews:", reviewsResponse.data);
+        console.log("Current cycle:", currentCycle._id);
         console.log("Current user ID:", user.id);
           // Log all reviewers to debug ID matching issues
         console.log("All reviewers:", reviewsResponse.data.map(r => ({
@@ -232,15 +250,27 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
       </Layout>
     );
   }
-  
-  // Calculate statistics
+    // Calculate statistics
   const totalAssigned = myReviews.length;
-  const completedReviews = myReviews.filter(r => r.status === 'submitted' || r.status === 'calibrated').length;
+  const completedReviews = myReviews.filter(r => r.status === 'submitted' || r.status === 'calibrated' || r.status === 'approved').length;
   const pendingReviews = totalAssigned - completedReviews;
   const completionPercentage = totalAssigned > 0 ? (completedReviews / totalAssigned) * 100 : 0;
   
-  const totalFeedbackAboutMe = reviewsAboutMe.length;
-  const receivedFeedback = reviewsAboutMe.filter(r => r.status === 'submitted' || r.status === 'calibrated').length;
+  // Calculate feedback about me statistics
+  // Check if a review cycle is active and has a status of in_progress or completed
+  const isActiveCycle = activeCycle && (activeCycle.status === 'in_progress' || activeCycle.status === 'completed');
+  
+  // Expected reviews should be all reviews about the user for the active cycle with any status
+  const totalFeedbackAboutMe = isActiveCycle ? 
+    reviewsAboutMe.filter(r => r.cycleId && r.cycleId._id === activeCycle._id).length : 
+    reviewsAboutMe.length;
+  
+  // Received feedback should be submitted, calibrated, or approved reviews about the user
+  const receivedFeedback = reviewsAboutMe.filter(r => 
+    (r.status === 'submitted' || r.status === 'calibrated' || r.status === 'approved') &&
+    (!isActiveCycle || (r.cycleId && r.cycleId._id === activeCycle._id))
+  ).length;
+  
   const pendingFeedback = totalFeedbackAboutMe - receivedFeedback;
   const feedbackPercentage = totalFeedbackAboutMe > 0 ? (receivedFeedback / totalFeedbackAboutMe) * 100 : 0;
   
@@ -279,12 +309,11 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
         </Box>
         
         <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6} mb={8}>
-          <Card>
-            <CardHeader>
+          <Card>            <CardHeader>
               <Heading size="md">My Reviews to Complete</Heading>
             </CardHeader>
-            <CardBody>
-              <SimpleGrid columns={2} spacing={4} mb={4}>
+            <CardBody pt={4} pb={6} px={5}>
+              <SimpleGrid columns={2} spacing={4} mb={5}>
                 <Stat>
                   <Flex align="center">
                     <Box mr={2}>
@@ -309,8 +338,7 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
                   </Flex>
                 </Stat>
               </SimpleGrid>
-              
-              <Box mb={4}>
+                <Box mb={5}>
                 <Flex justify="space-between" mb={1}>
                   <Text fontSize="sm">Completion</Text>
                   <Text fontSize="sm" fontWeight="bold">{completionPercentage.toFixed(0)}%</Text>
@@ -321,14 +349,13 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
                   borderRadius="full" 
                   colorScheme={completionPercentage === 100 ? "green" : "blue"} 
                 />
-              </Box>
-              
-              {pendingReviews > 0 ? (
+              </Box>{pendingReviews > 0 ? (
                 <Button 
                   rightIcon={<FiArrowRight />} 
-                  colorScheme="purple" 
-                  size="sm" 
+                  colorScheme="blue" 
+                  size="md" 
                   width="full"
+                  height="48px"
                   onClick={() => navigate('/reviews')}
                 >
                   Complete your {pendingReviews} pending review{pendingReviews > 1 ? 's' : ''}
@@ -341,6 +368,7 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
                   color="green.700" 
                   p={3} 
                   borderRadius="md"
+                  height="48px"
                 >
                   <Icon as={FiCheckCircle} mr={2} />
                   <Text>All reviews completed!</Text>
@@ -349,12 +377,11 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
             </CardBody>
           </Card>
           
-          <Card>
-            <CardHeader>
+          <Card>            <CardHeader>
               <Heading size="md">Feedback About Me</Heading>
             </CardHeader>
-            <CardBody>
-              <SimpleGrid columns={2} spacing={4} mb={4}>
+            <CardBody pt={4} pb={6} px={5}>
+              <SimpleGrid columns={2} spacing={4} mb={5}>
                 <Stat>
                   <Flex align="center">
                     <Box mr={2}>
@@ -363,6 +390,7 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
                     <Box>
                       <StatLabel>Received</StatLabel>
                       <StatNumber>{receivedFeedback}</StatNumber>
+                      <StatHelpText>Completed reviews</StatHelpText>
                     </Box>
                   </Flex>
                 </Stat>
@@ -375,29 +403,29 @@ const ReviewDashboard = () => {  const [activeCycle, setActiveCycle] = useState(
                     <Box>
                       <StatLabel>Expected</StatLabel>
                       <StatNumber>{totalFeedbackAboutMe}</StatNumber>
+                      <StatHelpText>Total reviews</StatHelpText>
                     </Box>
                   </Flex>
                 </Stat>
               </SimpleGrid>
               
-              <Box mb={4}>
+              <Box mb={5}>
                 <Flex justify="space-between" mb={1}>
                   <Text fontSize="sm">Progress</Text>
                   <Text fontSize="sm" fontWeight="bold">{feedbackPercentage.toFixed(0)}%</Text>
                 </Flex>
                 <Progress 
-                  value={feedbackPercentage} 
-                  size="sm" 
+                  value={feedbackPercentage}                  size="sm" 
                   borderRadius="full" 
-                  colorScheme="blue" 
+                  colorScheme={feedbackPercentage === 100 ? "green" : "blue"} 
                 />
               </Box>
-              
-              <Button 
-                rightIcon={<FiBarChart2 />} 
+                <Button 
+                rightIcon={<FiArrowRight />} 
                 colorScheme="blue" 
-                size="sm" 
+                size="md" 
                 width="full"
+                height="48px"
                 onClick={() => navigate('/reviews')}
               >
                 View my feedback

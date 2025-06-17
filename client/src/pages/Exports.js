@@ -50,19 +50,22 @@ const Exports = () => {
   
   const toast = useToast();
   const { user } = useAuth();
-  
-  useEffect(() => {
+    useEffect(() => {
     const fetchData = async () => {
       try {
-        const [cyclesData, usersData] = await Promise.all([
+        const [cyclesResponse, usersResponse] = await Promise.all([
           getReviewCycles(),
           getUsers()
         ]);
         
-        setCycles(cyclesData);
-        setUsers(usersData);
+        // Ensure we get the data property from the response and check if it's an array
+        const cyclesData = cyclesResponse.data || [];
+        const usersData = usersResponse.data || [];
         
-        if (cyclesData.length > 0) {
+        setCycles(Array.isArray(cyclesData) ? cyclesData : []);
+        setUsers(Array.isArray(usersData) ? usersData : []);
+        
+        if (Array.isArray(cyclesData) && cyclesData.length > 0) {
           setFormData(prev => ({ ...prev, cycleId: cyclesData[0]._id }));
         }
         
@@ -182,12 +185,11 @@ const Exports = () => {
                 
                 {formData.exportType === 'reviews' && (
                   <FormControl>
-                    <FormLabel>Review Cycle</FormLabel>
-                    <Select 
+                    <FormLabel>Review Cycle</FormLabel>                    <Select 
                       value={formData.cycleId} 
                       onChange={(e) => handleInputChange('cycleId', e.target.value)}
                     >
-                      {cycles.map((cycle) => (
+                      {Array.isArray(cycles) && cycles.map((cycle) => (
                         <option key={cycle._id} value={cycle._id}>
                           {cycle.name}
                         </option>
@@ -225,7 +227,7 @@ const Exports = () => {
                       value={formData.userId} 
                       onChange={(e) => handleInputChange('userId', e.target.value)}
                     >
-                      {users.map((user) => (
+                      {Array.isArray(users) && users.map((user) => (
                         <option key={user._id} value={user._id}>
                           {user.name} ({user.email})
                         </option>
@@ -279,7 +281,7 @@ const Exports = () => {
                         </Text>
                         {formData.exportType === 'reviews' && (
                           <Text>
-                            <strong>Cycle:</strong> {cycles.find(c => c._id === formData.cycleId)?.name || 'All Cycles'}
+                            <strong>Cycle:</strong> {Array.isArray(cycles) && cycles.find(c => c._id === formData.cycleId)?.name || 'All Cycles'}
                           </Text>
                         )}
                         <Text>
@@ -287,7 +289,7 @@ const Exports = () => {
                         </Text>
                         {formData.filterByUser && (
                           <Text>
-                            <strong>User:</strong> {users.find(u => u._id === formData.userId)?.name || 'Selected User'}
+                            <strong>User:</strong> {Array.isArray(users) && users.find(u => u._id === formData.userId)?.name || 'Selected User'}
                           </Text>
                         )}
                         {formData.exportType === 'reviews' && (

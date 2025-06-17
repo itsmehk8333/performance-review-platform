@@ -49,7 +49,7 @@ import {
   AlertIcon
 } from '@chakra-ui/react';
 import { ChevronDownIcon } from '@chakra-ui/icons';
-import { FiCalendar, FiClipboard, FiDownload, FiPlusCircle, FiUsers, FiFileText, FiRefreshCw, FiZap } from 'react-icons/fi';
+import { FiCalendar, FiClipboard, FiDownload, FiPlusCircle, FiUsers, FiFileText, FiRefreshCw, FiZap, FiThumbsUp } from 'react-icons/fi';
 import { format } from 'date-fns';
 import Layout from '../components/Layout';
 import { 
@@ -62,7 +62,10 @@ import {
   getReviewTemplates,
   updateReviewCycle,
   advanceReviewCycle,
-  generateReviewDraft
+  generateReviewDraft,
+  getPendingApprovals,
+  approveReview,
+  rejectReview
 } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
@@ -71,6 +74,7 @@ const Reviews = () => {
   const [cycles, setCycles] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
   const [selectedCycle, setSelectedCycle] = useState('');
   const [selectedReviewType, setSelectedReviewType] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState('');
@@ -108,13 +112,46 @@ const Reviews = () => {
   useEffect(() => {
     fetchCycles();
     fetchTemplates();
-  }, []);    useEffect(() => {
-    // Only fetch reviews if we have a selected cycle AND user data is loaded
+    if (isManager()) {
+      fetchPendingApprovals();
+    }
+  }, []);
+
+  // Add a new effect to fetch pending approvals when the cycle changes
+  useEffect(() => {
+    if (isManager() && selectedCycle) {
+      fetchPendingApprovals();
+    }
+  }, [selectedCycle]);
+  
+  // Add effect to fetch reviews when cycle, type, or template changes
+  useEffect(() => {
     if (selectedCycle && user && user.id) {
+      console.log(`Fetching reviews for cycle: ${selectedCycle}, type: ${selectedReviewType}, template: ${selectedTemplate}`);
       fetchReviews(selectedCycle, selectedReviewType, selectedTemplate);
     }
   }, [selectedCycle, selectedReviewType, selectedTemplate, user]);
-    const fetchCycles = async () => {
+  
+  // Add effect to refresh data when component is focused (when returning from detail page)
+  useEffect(() => {
+    const handleFocus = () => {
+      console.log('Reviews page focused - refreshing data');
+      if (selectedCycle && user && user.id) {
+        fetchReviews(selectedCycle, selectedReviewType, selectedTemplate);
+        if (isManager()) {
+          fetchPendingApprovals();
+        }
+      }
+    };
+
+    // Add event listener for when the window regains focus
+    window.addEventListener('focus', handleFocus);
+    
+    // Clean up
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [selectedCycle, selectedReviewType, selectedTemplate, user]);
+  
+  const fetchCycles = async () => {
     try {
       setLoading(true);
       const res = await getReviewCycles();
@@ -193,6 +230,25 @@ const Reviews = () => {
       toast({
         title: 'Error',
         description: 'Failed to fetch review templates',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+      setLoading(false);
+    }
+  };
+  
+  const fetchPendingApprovals = async () => {
+    try {
+      setLoading(true);
+      const res = await getPendingApprovals();
+      setPendingApprovals(res.data);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching pending approvals:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch pending approvals',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -692,6 +748,59 @@ const Reviews = () => {
       await fetchReviews(selectedCycle, selectedReviewType, selectedTemplate);
     }
   };
+    const handleApproveReview = async (reviewId) => {
+    try {
+      await approveReview(reviewId);
+      toast({
+        title: 'Review approved',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
+      // Always re-fetch from server for both reviews and approvals
+      await fetchPendingApprovals();
+      await fetchReviews(selectedCycle, selectedReviewType, selectedTemplate);
+      // Notify other components (like Dashboard) to refresh if needed
+      window.dispatchEvent(new Event('reviews-updated'));
+    } catch (error) {
+      console.error('Error approving review:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.msg || 'Failed to approve review',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+    const handleRejectReview = async (reviewId) => {
+    // For simplicity, we'll use a basic reason
+    // In a real implementation, you might want to prompt for a reason
+    const reason = "Needs improvement before approval";
+    try {
+      await rejectReview(reviewId, reason);
+      toast({
+        title: 'Review rejected',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
+      // Always re-fetch from server for both reviews and approvals
+      await fetchPendingApprovals();
+      await fetchReviews(selectedCycle, selectedReviewType, selectedTemplate);
+      // Notify other components (like Dashboard) to refresh if needed
+      window.dispatchEvent(new Event('reviews-updated'));
+    } catch (error) {
+      console.error('Error rejecting review:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.msg || 'Failed to reject review',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
   
   return (
     <Layout>
@@ -837,15 +946,15 @@ const Reviews = () => {
             </SimpleGrid>
           </CardBody>
         </Card>
-        
-        <Tabs variant="enclosed" colorScheme="purple">
+          <Tabs variant="enclosed" colorScheme="purple">
           <TabList>
             <Tab>My Reviews to Complete</Tab>
             <Tab>Reviews About Me</Tab>
+            {isManager() && <Tab>Pending Approvals</Tab>}
           </TabList>
           
           <TabPanels>
-            <TabPanel p={0} pt={4}>              {loading ? (
+            <TabPanel p={0} pt={4}>{loading ? (
                 <Flex justify="center" align="center" my={10}>
                   <Spinner size="xl" color="purple.500" />
                 </Flex>              ) : reviews.filter(r => {
@@ -873,6 +982,7 @@ const Reviews = () => {
                   <Tbody>                    {reviews
                       .filter(r => {
                         // Check if the user is the reviewer AND the review is pending
+                        // We need to handle both cases where reviewer might be a string ID or an object with _id
                         if (!r.reviewer || !user || !user.id) return false;
                         
                         // Ensure we compare string IDs consistently
@@ -941,8 +1051,7 @@ const Reviews = () => {
                     <Alert status="info" maxW="md" mx="auto" mt={4}>
                       <AlertIcon />
                       <Text fontSize="sm">During the self-assessment phase, you should complete your self-review.</Text>
-                    </Alert>
-                  )}
+                    </Alert>                  )}
                 </Box>
               )}
             </TabPanel>
@@ -1006,9 +1115,12 @@ const Reviews = () => {
                               </HStack>
                             )}
                           </Td>
-                          <Td>
-                            <Badge colorScheme={review.status === 'submitted' ? 'green' : 'yellow'}>
-                              {review.status === 'submitted' ? 'Submitted' : 'Pending'}
+                          <Td>                            <Badge colorScheme={
+                              review.status === 'approved' ? 'green' : 
+                              review.status === 'submitted' ? 'blue' : 'yellow'
+                            }>
+                              {review.status === 'approved' ? 'Approved' : 
+                               review.status === 'submitted' ? 'Submitted' : 'Pending'}
                             </Badge>
                           </Td>
                         </Tr>
@@ -1036,10 +1148,102 @@ const Reviews = () => {
                         <Text fontSize="sm">Current phase: <Badge colorScheme="blue">{cycles.find(c => c._id === selectedCycle)?.status || 'unknown'}</Badge></Text>
                       </Alert>
                     </VStack>
-                  )}
-                </Box>
+                  )}                </Box>
               )}
             </TabPanel>
+            
+            {/* Pending Approvals Tab Panel - Only for Managers */}
+            {isManager() && (
+              <TabPanel p={0} pt={4}>
+                {loading ? (
+                  <Flex justify="center" align="center" my={10}>
+                    <Spinner size="xl" color="purple.500" />
+                  </Flex>
+                ) : pendingApprovals.length > 0 ? (
+                  <Box>
+                    <Alert status="info" mb={4}>
+                      <AlertIcon />
+                      <Box>
+                        <Text fontWeight="bold">Approval Required</Text>
+                        <Text>You have {pendingApprovals.length} review{pendingApprovals.length !== 1 ? 's' : ''} awaiting your approval.</Text>
+                      </Box>
+                    </Alert>
+                    <Table variant="simple">
+                      <Thead>                        <Tr>
+                          <Th>Reviewee</Th>
+                          <Th>Reviewer</Th>
+                          <Th>Type</Th>
+                          <Th>Status</Th>
+                          <Th>Submitted</Th>
+                          <Th>Actions</Th>
+                        </Tr>
+                      </Thead>
+                      <Tbody>
+                        {pendingApprovals.map(review => (
+                          <Tr key={review._id}>
+                            <Td>
+                              <HStack>
+                                <Avatar size="xs" name={review.reviewee.name} src={review.reviewee.avatar} />
+                                <Text>{review.reviewee.name}</Text>
+                              </HStack>
+                            </Td>
+                            <Td>
+                              <HStack>
+                                <Avatar size="xs" name={review.reviewer.name} src={review.reviewer.avatar} />
+                                <Text>{review.reviewer.name}</Text>
+                              </HStack>
+                            </Td>                            <Td>{getReviewTypeBadge(review.type)}</Td>
+                            <Td>
+                              <Badge colorScheme={
+                                review.status === 'approved' ? 'green' : 
+                                review.status === 'submitted' ? 'blue' : 'yellow'
+                              }>
+                                {review.status === 'approved' ? 'Approved' : 
+                                 review.status === 'submitted' ? 'Submitted' : 'Pending'}
+                              </Badge>
+                            </Td>
+                            <Td>{review.submittedAt ? format(new Date(review.submittedAt), 'MMM d, yyyy') : 'N/A'}</Td>
+                            <Td>
+                              <HStack spacing={2}>
+                                <Button 
+                                  size="sm" 
+                                  colorScheme="blue" 
+                                  onClick={() => navigate(`/reviews/${review._id}`)}
+                                >
+                                  View
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  colorScheme="green" 
+                                  onClick={() => handleApproveReview(review._id)}
+                                >
+                                  Approve
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  colorScheme="red" 
+                                  onClick={() => handleRejectReview(review._id)}
+                                >
+                                  Reject
+                                </Button>
+                              </HStack>
+                            </Td>
+                          </Tr>
+                        ))}
+                      </Tbody>
+                    </Table>
+                  </Box>
+                ) : (
+                  <Box textAlign="center" py={10}>
+                    <Icon as={FiThumbsUp} boxSize={10} color="gray.300" mb={3} />
+                    <Text fontSize="xl" mb={4}>No pending approvals</Text>
+                    <Text color="gray.500">
+                      There are no reviews waiting for your approval at this time.
+                    </Text>
+                  </Box>
+                )}
+              </TabPanel>
+            )}
           </TabPanels>
         </Tabs>
       </Box>

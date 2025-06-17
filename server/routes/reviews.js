@@ -61,7 +61,7 @@ router.post('/cycles', adminOnly, async (req, res) => {
 // @route   GET api/reviews/cycles
 // @desc    Get all review cycles
 // @access  Private
-router.get('/cycles', async (req, res) => {
+router.get('/cycles', auth, async (req, res) => {
   try {
     const cycles = await ReviewCycle.find()
       .populate('templateId', 'name')
@@ -476,8 +476,38 @@ router.post('/:id/submit', async (req, res) => {
 // @route   GET api/reviews/export
 // @desc    Export reviews as CSV or PDF
 // @access  Private (Manager or Admin)
-router.get('/export', managerOrAdminOnly, async (req, res) => {
+router.get('/export', auth, async (req, res) => {
   try {
+    // Check if user and user.role exist
+    if (!req.user) {
+      console.log('Auth failed in reviews export: No user in request');
+      return res.status(403).json({ msg: 'Authentication required' });
+    }
+    
+    console.log('User object in reviews export:', JSON.stringify(req.user));
+    
+    if (!req.user.role) {
+      console.log('Auth failed in reviews export: User has no role property');
+      // Try to re-fetch the user with role populated
+      const fullUser = await User.findById(req.user._id || req.user.id).populate('role');
+      if (!fullUser || !fullUser.role) {
+        return res.status(403).json({ msg: 'User role information not available' });
+      }
+      // Use the fetched user's role
+      req.user = fullUser;
+    }
+    
+    // Now check the role
+    const roleName = typeof req.user.role === 'object' ? req.user.role.name : req.user.role;
+    console.log('User role determined to be:', roleName);
+    
+    if (roleName !== 'Manager' && roleName !== 'Admin') {
+      console.log(`Auth failed in reviews export: User role ${roleName} is not Manager or Admin`);
+      return res.status(403).json({ msg: 'Access denied: Manager or Admin only' });
+    }
+    
+    console.log('Reviews export access granted to:', req.user._id || req.user.id, 'with role:', roleName);
+    
     const { cycleId, type, format } = req.query;
     
     // Build filter object
@@ -532,8 +562,7 @@ router.get('/export', managerOrAdminOnly, async (req, res) => {
         doc.fontSize(10).text(`Cycle: ${review.cycleId.name}`);
         doc.fontSize(10).text(`Type: ${review.type}`);
         doc.fontSize(10).text(`Reviewer: ${review.reviewer.name} (${review.reviewer.email})`);
-        doc.fontSize(10).text(`Reviewee: ${review.reviewee.name} (${review.reviewee.email})`);
-        doc.fontSize(10).text(`Status: ${review.status}`);
+        doc.fontSize(10).text(`Reviewee: ${review.reviewee.name} (${review.reviewee.email})`);        doc.fontSize(10).text(`Status: ${review.status}`);
         doc.fontSize(10).text(`Date: ${review.submittedAt ? new Date(review.submittedAt).toLocaleString() : 'Not submitted'}`);
         doc.moveDown();
         
@@ -541,10 +570,24 @@ router.get('/export', managerOrAdminOnly, async (req, res) => {
         doc.fontSize(10).text(`${review.content || 'No content'}`);
         doc.moveDown();
         
+        doc.fontSize(10).text('Ratings:');
         if (review.ratings && Object.keys(review.ratings).length > 0) {
-          doc.fontSize(10).text('Ratings:');
-          for (const [key, value] of Object.entries(review.ratings)) {
-            doc.fontSize(10).text(`${key}: ${value}`);
+          // Safely extract ratings and format them properly
+          try {
+            // Check if ratings is a Map or an Object
+            if (review.ratings instanceof Map) {
+              for (const [key, value] of review.ratings.entries()) {
+                doc.fontSize(10).text(`${key}: ${value}/5`);
+              }
+            } else {
+              // Handle as regular object
+              Object.entries(review.ratings).forEach(([key, value]) => {
+                doc.fontSize(10).text(`${key}: ${value}/5`);
+              });
+            }
+          } catch (error) {
+            console.error('Error formatting ratings:', error);
+            doc.fontSize(10).text('Error displaying ratings data');
           }
         } else {
           doc.fontSize(10).text('No ratings provided');
@@ -597,6 +640,68 @@ router.get('/export', managerOrAdminOnly, async (req, res) => {
     }
   } catch (err) {
     console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
+// @route   GET api/reviews/pending-approvals
+// @desc    Get reviews pending approval for the current user
+// @access  Private - Manager and above
+router.get('/pending-approvals', managerAndAbove, async (req, res) => {
+  try {
+    console.log('Fetching pending approvals for user:', req.user.id);
+    let pendingReviews;
+    
+    // If admin, get all pending approvals
+    if (req.user.role === 'Admin') {
+      console.log('User is admin, fetching all pending approvals');
+      pendingReviews = await ApprovalService.getAllPendingApprovals();
+    } else {
+      // Otherwise get only approvals for direct reports
+      console.log('User is manager, fetching pending approvals for direct reports');
+      pendingReviews = await ApprovalService.getPendingApprovals(req.user.id);
+    }
+    
+    console.log(`Found ${pendingReviews.length} pending approvals`);
+    res.json(pendingReviews);
+  } catch (err) {
+    console.error('Error in pending-approvals endpoint:', err.message);
+    res.status(500).send('Server error');
+  }
+});
+
+// @route   POST api/reviews/:id/approve
+// @desc    Approve a review
+// @access  Private - Manager and above
+router.post('/:id/approve', managerAndAbove, async (req, res) => {
+  try {
+    console.log(`Approving review ${req.params.id} by user ${req.user.id}`);
+    const review = await ApprovalService.approveReview(req.params.id, req.user.id);
+    console.log(`Review ${req.params.id} approved successfully`);
+    res.json(review);
+  } catch (err) {
+    console.error('Error approving review:', err.message);
+    res.status(500).send('Server error');
+  }
+});
+
+// @route   POST api/reviews/:id/reject
+// @desc    Reject a review
+// @access  Private - Manager and above
+router.post('/:id/reject', managerAndAbove, async (req, res) => {
+  try {
+    const { rejectionReason } = req.body;
+    
+    if (!rejectionReason) {
+      return res.status(400).json({ msg: 'Rejection reason is required' });
+    }
+    
+    console.log(`Rejecting review ${req.params.id} by user ${req.user.id} with reason: ${rejectionReason}`);
+    const review = await ApprovalService.rejectReview(req.params.id, req.user.id, rejectionReason);
+    console.log(`Review ${req.params.id} rejected successfully`);
+    res.json(review);
+  } catch (err) {
+    console.error('Error rejecting review:', err.message);
     res.status(500).send('Server error');
   }
 });
@@ -908,21 +1013,46 @@ router.get('/:id/export', auth, async (req, res) => {
         doc.moveDown();
       });
     }
-    
-    // Add legacy ratings if they exist
-    if (review.ratings && Object.keys(review.ratings).length > 0) {
+      // Add legacy ratings if they exist
+    if (review.ratings) {
       doc.fontSize(16).text('Ratings', { underline: true });
       
-      Object.entries(review.ratings).forEach(([category, rating]) => {
-        doc.fontSize(12).text(`${category}: ${rating}/5`);
-      });
-      
-      // Calculate average rating
-      const ratings = Object.values(review.ratings);
-      const average = ratings.reduce((sum, val) => sum + val, 0) / ratings.length;
-      
-      doc.moveDown();
-      doc.fontSize(14).text(`Average Rating: ${average.toFixed(1)}/5`);
+      try {
+        // Check if ratings is a Map or an Object
+        if (review.ratings instanceof Map) {
+          for (const [category, rating] of review.ratings.entries()) {
+            doc.fontSize(12).text(`${category}: ${rating}/5`);
+          }
+          
+          // Calculate average rating from Map
+          const ratings = Array.from(review.ratings.values());
+          const average = ratings.length > 0 
+            ? ratings.reduce((sum, val) => sum + val, 0) / ratings.length 
+            : 0;
+          
+          doc.moveDown();
+          doc.fontSize(14).text(`Average Rating: ${average.toFixed(1)}/5`);
+        } else if (typeof review.ratings === 'object' && review.ratings !== null) {
+          // Handle as regular object
+          Object.entries(review.ratings).forEach(([category, rating]) => {
+            doc.fontSize(12).text(`${category}: ${rating}/5`);
+          });
+          
+          // Calculate average rating
+          const ratings = Object.values(review.ratings);
+          const average = ratings.length > 0 
+            ? ratings.reduce((sum, val) => sum + val, 0) / ratings.length 
+            : 0;
+          
+          doc.moveDown();
+          doc.fontSize(14).text(`Average Rating: ${average.toFixed(1)}/5`);
+        } else {
+          doc.fontSize(12).text('Ratings data format not recognized');
+        }
+      } catch (error) {
+        console.error('Error formatting ratings:', error);
+        doc.fontSize(12).text('Error displaying ratings data');
+      }
     }
     
     // Add overall rating if present
@@ -950,91 +1080,8 @@ router.get('/:id/export', auth, async (req, res) => {
     doc.end();
   } catch (err) {
     console.error(err.message);
-    if (err.kind === 'ObjectId') {
-      return res.status(404).json({ msg: 'Review not found' });
+    if (err.kind === 'ObjectId') {      return res.status(404).json({ msg: 'Review not found' });
     }
-    res.status(500).send('Server error');
-  }
-});
-
-// @route   POST api/reviews/:id/approve
-// @desc    Approve a review
-// @access  Private - Manager and above
-router.post('/:id/approve', managerAndAbove, async (req, res) => {
-  try {
-    console.log(`Attempting to approve review: ${req.params.id} by user: ${req.user.id}`);
-    
-    // First check if the review exists and get its current status
-    const reviewCheck = await Review.findById(req.params.id);
-    if (!reviewCheck) {
-      return res.status(404).json({ msg: 'Review not found' });
-    }
-    
-    console.log(`Review found with status: ${reviewCheck.status} and approvalStatus: ${reviewCheck.approvalStatus}`);
-    
-    // Proceed with approval
-    const review = await ApprovalService.approveReview(req.params.id, req.user.id);
-    res.json(review);
-  } catch (err) {
-    console.error(`Error in review approval: ${err.message}`);
-    return res.status(400).json({ msg: err.message });
-  }
-});
-
-// @route   POST api/reviews/:id/reject
-// @desc    Reject a review
-// @access  Private - Manager and above
-router.post('/:id/reject', managerAndAbove, async (req, res) => {
-  try {
-    console.log(`Attempting to reject review: ${req.params.id} by user: ${req.user.id}`);
-    console.log('Request body:', req.body);
-    
-    const { rejectionReason } = req.body;
-    
-    if (!rejectionReason) {
-      return res.status(400).json({ msg: 'Rejection reason is required' });
-    }
-    
-    // First check if the review exists and get its current status
-    const reviewCheck = await Review.findById(req.params.id);
-    if (!reviewCheck) {
-      return res.status(404).json({ msg: 'Review not found' });
-    }
-    
-    console.log(`Review found with status: ${reviewCheck.status} and approvalStatus: ${reviewCheck.approvalStatus}`);
-    
-    // Proceed with rejection
-    const review = await ApprovalService.rejectReview(req.params.id, req.user.id, rejectionReason);
-    res.json(review);
-  } catch (err) {
-    console.error(`Error in review rejection: ${err.message}`);
-    return res.status(400).json({ msg: err.message });
-  }
-});
-
-// @route   GET api/reviews/pending-approvals
-// @desc    Get reviews pending approval for the current user
-// @access  Private - Manager and above
-router.get('/pending-approvals', managerAndAbove, async (req, res) => {
-  try {
-    let pendingReviews;
-    
-    console.log('Getting pending approvals for user:', req.user.id, 'with role:', req.user.role.name);
-    
-    // If admin, get all pending approvals
-    if (req.user.role.name === 'Admin') {
-      console.log('User is admin, getting all pending approvals');
-      pendingReviews = await ApprovalService.getAllPendingApprovals();
-    } else {
-      // Otherwise get only approvals for direct reports
-      console.log('User is manager, getting approvals for direct reports');
-      pendingReviews = await ApprovalService.getPendingApprovals(req.user.id);
-    }
-    
-    console.log('Found pending reviews:', pendingReviews.length);
-    res.json(pendingReviews);
-  } catch (err) {
-    console.error(err.message);
     res.status(500).send('Server error');
   }
 });
@@ -1045,7 +1092,6 @@ router.get('/pending-approvals', managerAndAbove, async (req, res) => {
 router.post('/cycles/:id/configure-phases', adminOnly, async (req, res) => {
   try {
     const { phases } = req.body;
-    
     if (!phases || !Array.isArray(phases)) {
       return res.status(400).json({ msg: 'Phases configuration is required' });
     }

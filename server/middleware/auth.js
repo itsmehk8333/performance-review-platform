@@ -43,12 +43,31 @@ const adminOnly = async (req, res, next) => {
 // Middleware to check if user has manager role or above
 const managerOrAbove = async (req, res, next) => {
   try {
-    if (!req.user || !req.user.role || 
-        (req.user.role.name !== 'Manager' && req.user.role.name !== 'Admin')) {
+    console.log('Manager or Admin check for user:', req.user ? req.user._id : 'no user');
+    console.log('User role:', req.user && req.user.role ? (typeof req.user.role === 'object' ? req.user.role.name : req.user.role) : 'no role');
+    
+    if (!req.user) {
+      console.log('Auth failed: No user in request');
       return res.status(403).json({ msg: 'Access denied: Manager or Admin only' });
     }
+    
+    if (!req.user.role) {
+      console.log('Auth failed: User has no role');
+      return res.status(403).json({ msg: 'Access denied: Manager or Admin only' });
+    }
+    
+    // Handle both object roles and string roles
+    const roleName = typeof req.user.role === 'object' ? req.user.role.name : req.user.role;
+    
+    if (roleName !== 'Manager' && roleName !== 'Admin') {
+      console.log(`Auth failed: User role ${roleName} is not Manager or Admin`);
+      return res.status(403).json({ msg: 'Access denied: Manager or Admin only' });
+    }
+    
+    console.log('Auth succeeded: User is a', roleName);
     next();
   } catch (err) {
+    console.error('Error in managerOrAbove middleware:', err);
     res.status(500).json({ msg: 'Server error' });
   }
 };
